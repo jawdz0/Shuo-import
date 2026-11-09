@@ -447,6 +447,7 @@ def norm_url(url, follow=True):
         raise ToolError('Paste a YouTube or Bilibili link first.', 'bad_url')
     if len(u) > 300:
         raise ToolError('That link is too long. Paste the link of one video.', 'bad_url')
+    u = re.sub(r'^(?!https?://)[htps]{0,5}:?//', 'https://', u, flags=re.I)   # (the start of the link cut off: "ttps://…")
     m = re.search(r'https?://[^\s"<>【】]+', u)
     if m and not re.match(r'^https?://', u, re.I):
         u = m.group(0)             # a share text: the link in it
@@ -484,6 +485,7 @@ def norm_url(url, follow=True):
     m = re.match(r'^https?://(?:www\.|m\.)?bilibili\.com(/[^#]*)?$', u, re.I)
     if m:
         path = m.group(1) or '/'
+        path = re.sub(r'^/[a-z]{2}(?:-[a-z]{2,4})?(?=/video/)', '', path, flags=re.I)   # (a language in it: /zh-Hans/video/…)
         mv = re.match(r'^/video/(BV[0-9A-Za-z]{10}|av\d{1,12})/?(\?.*)?$', path, re.I)
         if not mv:
             if re.match(r'^/(?:bangumi|cheese|medialist|list|festival)/', path) or 'space.bilibili' in u:
@@ -1888,6 +1890,8 @@ def selftest(quick=True):
     def c_links():
         got = [norm_url(u, follow=False) for u in ('dQw4w9WgXcQ', 'https://youtu.be/dQw4w9WgXcQ?t=3', 'BV1GJ411x7h7',
                                                     'https://m.bilibili.com/video/BV1GJ411x7h7?p=2&share=1',
+                                                    'https://www.bilibili.com/zh-Hans/video/BV1GJ411x7h7/?share_source=copy_web&vd_source=66ee',
+                                                    'ttps://www.bilibili.com/video/BV1GJ411x7h7/',
                                                     '【标题】 https://www.bilibili.com/video/av170001')]
         for bad in ('https://example.com/x.mp4', 'file:///etc/passwd', 'https://www.bilibili.com/bangumi/play/ss1'):
             try:
