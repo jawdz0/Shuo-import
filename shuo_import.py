@@ -308,11 +308,44 @@ def ytw(req, job=None, on_line=None, quiet_for=300, total=None):
 # Optional: SHUO_COOKIES, a cookies.txt (Netscape format) of a spare YouTube or Bilibili account, for when the site
 # keeps asking this server to prove it isn't a bot (or Bilibili's subtitles, which need an account). Kept only in the
 # secret and in a private copy for each task, deleted when the task ends; never in an answer or the log.
+COOKIE_FILES = ('/etc/secrets/cookies.txt', '/etc/secrets/SHUO_COOKIES')   # (Render's Secret Files; HF: the SHUO_COOKIES secret)
+
+
 def _cookies():
+    """The cookies.txt (Netscape format), from the SHUO_COOKIES secret or a secret file (SHUO_COOKIES_FILE, or Render's
+    /etc/secrets/cookies.txt). A web form may have turned its tabs into spaces: each line of 7 fields gets its tabs back."""
     t = (os.environ.get('SHUO_COOKIES') or '').strip()
-    if not t or '\t' not in t:
+    if not t:
+        for f in ((os.environ.get('SHUO_COOKIES_FILE') or '').strip(),) + COOKIE_FILES:
+            try:
+                if f and os.path.isfile(f) and os.path.getsize(f) < 1024 * 1024:
+                    t = open(f, encoding='utf-8', errors='replace').read().strip()
+                    if t:
+                        break
+            except OSError:
+                continue
+    if not t:
         return ''
-    return t if t.startswith('#') else '# Netscape HTTP Cookie File\n' + t
+    out, n = [], 0
+    for ln in t.replace('\r\n', '\n').replace('\r', '\n').split('\n'):
+        ln = ln.strip()
+        if not ln or (ln.startswith('#') and not ln.startswith('#HttpOnly_')):
+            continue
+        parts = ln.split('\t') if '\t' in ln else ln.split()
+        if len(parts) == 6:   # (a cookie with an empty value)
+            parts.append('')
+        if len(parts) != 7 or not re.match(r'^\d+$', parts[4].strip() or '0'):
+            continue
+        out.append('\t'.join(x.strip() for x in parts))
+        n += 1
+    return '# Netscape HTTP Cookie File\n' + '\n'.join(out) if n else ''
+
+
+def _logins():
+    """Which sites the cookies log in to (only yes or no: never what they are)"""
+    t = _cookies()
+    return {'bilibili': bool(re.search(r'bilibili\.com\t[^\n]*\tSESSDATA\t\S', t)),
+            'youtube': bool(re.search(r'youtube\.com\t[^\n]*\t(?:__Secure-[13]PSID|SID|LOGIN_INFO)\t\S', t))}
 
 
 def _cookie_copy():
@@ -702,6 +735,8 @@ def probe(url, with_thumb=True):
         'language': info.get('language') or '', 'thumb': _small_thumb(res.get('thumb')) if with_thumb else None,
         'captions': caption_tracks(info, site), 'heights': heights, 'sizes': sizes,
         'webpage_url': info.get('webpage_url') or url, 'description': _desc(info),
+        # Bilibili shows its (AI) subtitles only to someone logged in: without a Bilibili login here, say so
+        'need_login': bool(site == 'Bilibili' and not caption_tracks(info, site) and not _logins()['bilibili']),
     }
 
 
@@ -1811,7 +1846,7 @@ def transcribe(job, path):
 # ---------------------------------------------------------------- status and checks
 
 def helper_info():
-    out = {'ok': True, 'version': VERSION, 'server': 'cloud', 'sites': ['YouTube', 'Bilibili'], 'problems': []}
+    out = {'ok': True, 'version': VERSION, 'server': 'cloud', 'sites': ['YouTube', 'Bilibili'], 'problems': [], 'logins': _logins()}
     out['ytdlp'] = _installed('yt-dlp')
     if not out['ytdlp']:
         out['ok'] = False
@@ -2208,7 +2243,7 @@ def _usage(add=0):
 
 STATUS_PAGE = '''<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>shuo import</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:34em;margin:2em auto;padding:0 16px;color:#222}
-b{color:%s}</style><h1>shuo import</h1><p><b>%s</b></p><p>%s</p><p style="color:#777">Version %s · yt-dlp %s · transcripts: %s · account cookies: %s</p>'''
+b{color:%s}</style><h1>shuo import</h1><p><b>%s</b></p><p>%s</p><p style="color:#777">Version %s · yt-dlp %s · transcripts: %s · logged in to: %s</p>'''
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -2262,7 +2297,7 @@ class Handler(BaseHTTPRequestHandler):
                                     + (' %d more %s can use it with their own keys.' % (others, 'person' if others == 1 else 'people') if others else ''))
                                    if key else 'The key isn\'t set yet: in the Space\'s Settings, under Variables and secrets, add a secret named SHUO_KEY (at least 16 characters), then restart the Space.',
                                    VERSION, _installed('yt-dlp') or 'missing', 'yes' if (mp['model'] and mp['vad']) else 'no',
-                                   'set' if _cookies() else 'none')).encode('utf-8')
+                                   ', '.join(k for k, v in _logins().items() if v) or ('set' if _cookies() else 'none'))).encode('utf-8')
             self._send(200, body, 'text/html; charset=utf-8')
         elif r == 'mcp':
             self._send(405, b'', headers={'Allow': 'POST'})
