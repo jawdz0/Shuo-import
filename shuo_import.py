@@ -714,7 +714,12 @@ def probe(url, with_thumb=True):
     url = norm_url(url)
     site = site_of(url)
     try:
-        res = ytw({'op': 'info', 'url': url, 'opts': base_opts({'skip_download': True}), 'thumb': with_thumb}, total=120)
+        # Bilibili's subtitles are looked up only when yt-dlp is asked for them (writesubtitles: with skip_download and
+        # no download, nothing is written); YouTube's come with the video's info anyway
+        o = {'skip_download': True}
+        if site == 'Bilibili':
+            o.update({'writesubtitles': True, 'subtitleslangs': ['all', '-danmaku']})
+        res = ytw({'op': 'info', 'url': url, 'opts': base_opts(o), 'thumb': with_thumb}, total=120)
     except Cancelled:
         raise ToolError('Stopped.', 'cancelled')
     except YtwError as e:
